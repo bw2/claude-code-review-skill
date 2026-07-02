@@ -1,13 +1,10 @@
 ---
 name: review
 description: >
-  Runs code review using two separate agentic CLI tools — Claude and agy
-  (Google Antigravity). The two agents indepedently review your code in
-  parallel, merge the results into a deduplicated list, and then do a second
-  validation pass to see if they agree with eachothers' findings. At the end,
-  you are represented with a list of all findings along with the level of
-  agreement between the two agents (Agreed, Disputed, etc), and the proposed
-  fixes.
+  Performs code review by launching two agentic CLI tools — Claude and agy
+  (Google Antigravity) - in parallel. Then, it merges their findings into a deduplicated list and lauches a 
+  validation pass, asking Claude and agy to check whether they agree with eachothers' findings. Then, it presents
+  you with a final list of findings so that you can choose which ones to fix.
 ---
 
 # Review Skill
