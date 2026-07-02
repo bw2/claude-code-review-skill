@@ -1,11 +1,13 @@
 ---
 name: review
 description: >
-  Run parallel code reviews using Claude and agy (Google Antigravity)
-  directly against local files — no context bundling. Every consolidated
-  finding is then re-scored by both validators under a neutral prompt that
-  hides authorship; results are presented with confidence labels. Use when the
-  user says "/review" followed by instructions.
+  Runs code review using two separate agentic CLI tools — Claude and agy
+  (Google Antigravity). The two agents indepedently review your code in
+  parallel, merge the results into a deduplicated list, and then do a second
+  validation pass to see if they agree with eachothers' findings. At the end,
+  you are represented with a list of all findings along with the level of
+  agreement between the two agents (Agreed, Disputed, etc), and the proposed
+  fixes.
 ---
 
 # Review Skill
