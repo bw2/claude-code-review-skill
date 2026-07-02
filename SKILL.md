@@ -168,17 +168,17 @@ All runs use `run_in_background: true`. Each agent runs in its own subdirectory 
 
 **Opus — pinned model, fast non-interactive:**
 ```bash
-cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.code_review/opus" && cat ../XX_PROMPT__<label>__opus.md | claude -p --model opus --dangerously-skip-permissions --output-format text
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.code_review/opus" && cat ../XX_PROMPT__<label>__opus.md | claude -p --model opus --output-format text
 ```
 
 **Sonnet — pinned model, fast non-interactive:**
 ```bash
-cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.code_review/sonnet" && cat ../XX_PROMPT__<label>__sonnet.md | claude -p --model sonnet --dangerously-skip-permissions --output-format text
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.code_review/sonnet" && cat ../XX_PROMPT__<label>__sonnet.md | claude -p --model sonnet --output-format text
 ```
 
 **agy (only when in this run's roster) — permissions auto-approved, 10-minute print timeout (default is 5m, which can be short for review-sized prompts):**
 ```bash
-cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.code_review/agy" && OUTPUT=$(cat ../XX_PROMPT__<label>__agy.md | agy -p --dangerously-skip-permissions --print-timeout 10m 2>&1); STATUS=$?; echo "$OUTPUT"; if [ -z "$(echo "$OUTPUT" | tr -d '[:space:]')" ] || [ "$STATUS" -ne 0 ]; then echo "AGY_FAILED"; fi
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.code_review/agy" && OUTPUT=$(cat ../XX_PROMPT__<label>__agy.md | agy -p --print-timeout 10m 2>&1); STATUS=$?; echo "$OUTPUT"; if [ -z "$(echo "$OUTPUT" | tr -d '[:space:]')" ] || [ "$STATUS" -ne 0 ]; then echo "AGY_FAILED"; fi
 ```
 
 If agy prints `AGY_FAILED`, drop it from this run's roster and proceed with opus + sonnet only — no stand-in needed, since that pair is already a complete two-reviewer roster on its own. If opus or sonnet itself fails (non-zero exit, empty output) — unusual, since both run through the same `claude` CLI executing this skill — proceed with whichever survived (plus agy, if in the roster); do not fabricate output for the missing slot.
