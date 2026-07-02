@@ -8,9 +8,7 @@ description: >
 
 # Review Skill
 
-Two independent reviewers (Claude, agy) detect issues in parallel by reading the local files directly — there is **no shared context bundle**. Every consolidated finding is then scored by both validators (each running locally with disk access) using a deliberately neutral prompt — no reviewer attribution, no meta-framing about peer review. The prompt removes explicit authorship signals, though residual stylistic fingerprints in the verbatim `claim` text may still leak self-recognition. Findings are presented with confidence labels derived purely from validator votes (Agreed / Disputed / Rejected / Inconclusive).
-
-Both CLIs (claude, agy) can read disk, so no file-tree + numbered-file-contents bundle is needed — each agent runs in its own working directory and reads the target files from the repo on its own.
+Two independent reviewers (Claude, agy) detect issues in parallel by reading local files directly. Every consolidated finding is then scored by both validators (each running locally with disk access) using a deliberately neutral prompt — no reviewer attribution, no meta-framing about peer review. The prompt removes explicit authorship signals. Findings are presented with confidence labels derived purely from validator votes (Agreed / Disputed / Rejected / Inconclusive).
 
 ## Requirements
 
