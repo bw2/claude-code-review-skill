@@ -1,19 +1,24 @@
 ---
 name: review
 description: >
-  Performs code review by launching two agentic CLI tools — Claude and agy
-  (Google Antigravity) - in parallel. Then, it merges their findings into a deduplicated list and lauches a 
-  validation pass, asking Claude and agy to agree or disagree with eachothers' findings. Then, it gives you a final list of findings so that you can choose which ones to fix.
+  Performs code review by launching Claude twice under two different models —
+  Opus and Sonnet — plus (optionally) agy (Google Antigravity), all in
+  parallel. Then, it merges their findings into a deduplicated list and
+  launches a validation pass, asking each reviewer in the roster to agree or
+  disagree with the others' findings. Then, it gives you a final list of
+  findings so that you can choose which ones to fix.
 ---
 
 # Review Skill
 
-Two independent reviewers (Claude, agy) detect issues in parallel by reading local files directly. Every consolidated finding is then scored by both validators (each running locally with disk access) using a deliberately neutral prompt — no reviewer attribution, no meta-framing about peer review. The prompt removes explicit authorship signals. Findings are presented with confidence labels derived purely from validator votes (Agreed / Disputed / Rejected / Inconclusive).
+Two Claude reviewers — one pinned to **Opus**, one pinned to **Sonnet** — plus an optional third reviewer, **agy** (Google Antigravity), detect issues in parallel by reading local files directly. Every consolidated finding is then scored by every reviewer in this run's roster (each running locally with disk access) using a deliberately neutral prompt — no reviewer attribution, no meta-framing about peer review. The prompt removes explicit authorship signals. Findings are presented with confidence labels derived purely from validator votes.
+
+agy is optional. The skill auto-detects whether the `agy` CLI is installed and drops it from the roster if not, and you can also ask to skip it explicitly (`/review --no-agy`, or "skip agy" / "without agy" anywhere in your instructions) even when it is installed. With agy in the roster there are 3 reviewers/validators (confidence tiers: Unanimous / Agreed / Controversial / Rejected / Inconclusive); without it there are 2 (Agreed / Disputed / Rejected / Inconclusive).
 
 ## Requirements
 
-- `claude` CLI (this skill runs inside it, so it's already present).
-- `agy` CLI ([Google Antigravity](https://antigravity.google/)), installed and authenticated.
+- `claude` CLI (this skill runs inside it, so it's already present) — invoked twice per step, once with `--model opus` and once with `--model sonnet`.
+- `agy` CLI ([Google Antigravity](https://antigravity.google/)), installed and authenticated — **optional**. If missing (or explicitly skipped), the skill runs with the two Claude reviewers only.
 
 ## Workflow
 
@@ -22,8 +27,14 @@ Two independent reviewers (Claude, agy) detect issues in parallel by reading loc
 ### Step 1: Setup
 
 ```bash
-cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" && mkdir -p .code_review/claude .code_review/agy
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" && mkdir -p .code_review/opus .code_review/sonnet .code_review/agy
 ```
+
+**Decide whether agy is in this run's roster.** Include it only if BOTH:
+1. The user did not ask to skip it — scan the raw `/review` argument (before Step 2 parses it for a target) for `--no-agy`, or plain language such as "skip agy" / "without agy" / "don't use agy". If found, strip it from the argument string before Step 2 resolves the target, so it isn't mistaken for a path.
+2. `command -v agy >/dev/null 2>&1` finds it on PATH.
+
+If either check fails, proceed with the **opus + sonnet roster only** for the rest of this run. Tell the user which roster is in effect before launching anything (e.g. "agy not found on PATH — reviewing with opus + sonnet only" or "skipping agy per your request"). Unlike opus and sonnet — core to every run — agy is purely additive: if it's out, there's no stand-in to find, just a smaller, still-complete roster.
 
 Generate a unique run id `XX` as the current timestamp in the format `YYYYMMDD_HHMMSS`:
 
@@ -35,7 +46,7 @@ Use this same `XX` value as the prefix for every file the skill writes under `.c
 
 ### Step 1b: Decide whether to split into independent subsets
 
-Large projects can exceed what the detection models can usefully attend to in a single review, even when each agent reads the files from disk itself — review quality degrades long before the context-window hard limit, and a single agent juggling 50 files reasons more shallowly than two agents handling ~25 each. When the target is large, the review is split into multiple subsets that are reviewed in parallel as independent pipelines, then merged at synthesis (Step 6).
+Large projects can exceed what the detection models can usefully attend to in a single review, even when each agent reads the files from disk itself — review quality degrades long before the context-window hard limit, and a single agent juggling 50 files reasons more shallowly than splitting the work across reviewers. When the target is large, the review is split into multiple subsets that are reviewed in parallel as independent pipelines, then merged at synthesis (Step 6).
 
 **Resolve the file list and measure the target.** First resolve the user's argument the same way Step 2 will (explicit paths, `git diff main...HEAD`, or all files under a directory via `git ls-files`). Then compute:
 - Total source lines: `wc -l <files>` (sum the `total` row).
@@ -66,9 +77,9 @@ Print the planned splits to the user as a brief preview before launching reviewe
 
 **Threading subsets through Steps 2–5.** When more than one subset is planned, run Steps 2–5 **once per subset**, with these naming conventions:
 - The Step 2 `<label>` becomes `<base-label>__<subset-name>` (e.g. `swedish_flashcards__web-ui`). All existing `XX_PROMPT__<label>__…` and `XX_PROMPT__<label>_…_validate.md` paths in Steps 2–5 keep their exact shape; only the `<label>` value carries the subset.
-- The reviewer/validator subdirectories (`.code_review/claude`, `.code_review/agy`) are shared across subsets — each subset's CLI invocations use a distinct prompt-file path, so parallel runs from the same subdirectory don't collide as long as we rely on captured stdout (we do; no CLI writes files we depend on later).
+- The reviewer/validator subdirectories (`.code_review/opus`, `.code_review/sonnet`, `.code_review/agy`) are shared across subsets — each subset's CLI invocations use a distinct prompt-file path, so parallel runs from the same subdirectory don't collide as long as we rely on captured stdout (we do; no CLI writes files we depend on later).
 
-**Concurrency cap.** Launching every (subset × reviewer) at once can trip rate limits and overload the machine. **Cap at ~4 concurrent CLI invocations.** Batch the work: e.g. with 3 subsets × 2 detection agents = 6 runs, launch 4 first and queue the remaining 2 to start as earlier ones finish. Use `run_in_background: true` with `Monitor` to wait, or chain sequentially after a first batch returns. The same cap applies to the Step 5 validation pass.
+**Concurrency cap.** Launching every (subset × reviewer) at once can trip rate limits and overload the machine. **Cap at ~6 concurrent CLI invocations when agy is in the roster (3 reviewers), ~4 when it isn't (2 reviewers).** Batch the work: e.g. with 3 subsets × 3 reviewers = 9 runs, launch 6 first and queue the remaining 3 to start as earlier ones finish. Use `run_in_background: true` with `Monitor` to wait, or chain sequentially after a first batch returns. The same cap applies to the Step 5 validation pass.
 
 If only a single subset is planned (project is below threshold), the rest of the skill behaves exactly as it did before splitting was introduced.
 
@@ -76,7 +87,7 @@ If only a single subset is planned (project is below threshold), the rest of the
 
 > **Per subset.** When Step 1b planned multiple subsets, perform this step once per subset using that subset's file list as the resolved `{TARGET}`. Express `{TARGET}` as an explicit file list (e.g. "the files `path/to/foo.py` and `path/to/bar.py` (paths are relative to the repo root)") so the agent reviews only the subset's files. Use `<label>` = `<base-label>__<subset-name>` in the prompt-file paths. Write all subsets' prompts before moving on to Step 3.
 
-Parse the user's argument to `/review`:
+Parse the user's argument to `/review` (after the Step 1 skip-agy scan has already stripped `--no-agy`, if present):
 - If it names files/directories or a git ref (e.g. `--diff main...HEAD`), use that.
 - Otherwise default to `git diff main...HEAD` if there's a non-empty diff, else "the code in the current directory".
 
@@ -85,7 +96,7 @@ Resolve `{TARGET}` to a concrete description the agent can act on, e.g.:
 - "the changes in `git diff main...HEAD` (run the diff yourself to see them, then read the changed files in full)"
 - "all source files under `./analysis/` (use `git ls-files analysis/` to enumerate, then read each)"
 
-Write two per-agent detection prompts — `.code_review/XX_PROMPT__<label>__claude.md` and `.code_review/XX_PROMPT__<label>__agy.md` — using the template below with `<agent>` substituted to the agent's actual subdirectory name (`claude` or `agy`) in each file. The two prompts are identical EXCEPT the agy prompt additionally gets the **agy narration-suppression block** (defined below the template) appended at its very end. (A single shared file would leave the literal `<agent>` placeholder in the prompt, which is confusing to the model even if path resolution via `../..` still works.)
+Write one detection prompt per reviewer in the active roster — `.code_review/XX_PROMPT__<label>__opus.md`, `.code_review/XX_PROMPT__<label>__sonnet.md`, and, if agy is in the roster, `.code_review/XX_PROMPT__<label>__agy.md` — using the template below with `<agent>` substituted to the agent's actual subdirectory name (`opus`, `sonnet`, or `agy`) in each file. The prompts are identical EXCEPT the agy prompt additionally gets the **agy narration-suppression block** (defined below the template) appended at its very end. (A single shared file would leave the literal `<agent>` placeholder in the prompt, which is confusing to the model even if path resolution via `../..` still works.)
 
 ````
 Do a thorough code review of {TARGET}.
@@ -151,47 +162,47 @@ If the user passed extra instructions beyond a target, append them after the tem
 
 (The reference to `<scratch>` matches the detection template; for the Step 5 validation prompt, which has no `<scratch>` block, drop that clause so the last sentence reads "Your entire stdout should be the single final ```json block — nothing else.")
 
-### Step 3: Launch both detection agents in parallel
+### Step 3: Launch the active roster's detection agents in parallel
 
-Both runs use `run_in_background: true`. Each agent runs in its own subdirectory (`.code_review/claude`, `.code_review/agy`) two levels below the repo root, so it reads the repo from `../..`. **When multiple subsets exist, launch each subset's two agents the same way, but obey the Step 1b concurrency cap (~4 concurrent CLI invocations across all subsets × agents) — batch the remainder and start queued runs as earlier ones finish.**
+All runs use `run_in_background: true`. Each agent runs in its own subdirectory (`.code_review/opus`, `.code_review/sonnet`, and, if in the roster, `.code_review/agy`) two levels below the repo root, so it reads the repo from `../..`. **When multiple subsets exist, launch each subset's agents the same way, but obey the Step 1b concurrency cap — batch the remainder and start queued runs as earlier ones finish.**
 
-**Claude — fast non-interactive, uses your CLI's default model:**
+**Opus — pinned model, fast non-interactive:**
 ```bash
-cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.code_review/claude" && cat ../XX_PROMPT__<label>__claude.md | claude -p --dangerously-skip-permissions --output-format text
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.code_review/opus" && cat ../XX_PROMPT__<label>__opus.md | claude -p --model opus --dangerously-skip-permissions --output-format text
 ```
 
-**agy — permissions auto-approved, 10-minute print timeout (default is 5m, which can be short for review-sized prompts):**
+**Sonnet — pinned model, fast non-interactive:**
+```bash
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.code_review/sonnet" && cat ../XX_PROMPT__<label>__sonnet.md | claude -p --model sonnet --dangerously-skip-permissions --output-format text
+```
+
+**agy (only when in this run's roster) — permissions auto-approved, 10-minute print timeout (default is 5m, which can be short for review-sized prompts):**
 ```bash
 cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.code_review/agy" && OUTPUT=$(cat ../XX_PROMPT__<label>__agy.md | agy -p --dangerously-skip-permissions --print-timeout 10m 2>&1); STATUS=$?; echo "$OUTPUT"; if [ -z "$(echo "$OUTPUT" | tr -d '[:space:]')" ] || [ "$STATUS" -ne 0 ]; then echo "AGY_FAILED"; fi
 ```
 
-**Claude stand-in (only if agy failed at detection):** if the agy run printed `AGY_FAILED` (empty output, non-zero exit, or only whitespace), launch a second, independent Claude detection run as agy's replacement so consolidation still has two independent sets of findings to cross-check. Run sequentially after the agy result is known (the failure returns quickly once the timeout/empty-output check trips):
-
-```bash
-cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.code_review/claude" && cat ../XX_PROMPT__<label>__agy.md | sed 's|`.code_review/agy/`|`.code_review/claude/`|g' | claude -p --dangerously-skip-permissions --output-format text
-```
-
-This stand-in runs Claude with its CLI's default model — the same model as the main Claude detection run — so it adds a second independent inference but not a distinct second model. From Step 4 onward, treat this run as the second reviewer (detection identities are not surfaced at synthesis, so no special label is needed). If this stand-in also fails, proceed with only the surviving detection run's findings — do not manufacture a second set.
+If agy prints `AGY_FAILED`, drop it from this run's roster and proceed with opus + sonnet only — no stand-in needed, since that pair is already a complete two-reviewer roster on its own. If opus or sonnet itself fails (non-zero exit, empty output) — unusual, since both run through the same `claude` CLI executing this skill — proceed with whichever survived (plus agy, if in the roster); do not fabricate output for the missing slot.
 
 ### Step 4: Consolidate findings
 
 > **Per subset.** When Step 1b planned multiple subsets, perform consolidation independently per subset (each subset has its own set of agent JSON outputs). Use subset-local finding ids like `<subset-name>:X1`, `<subset-name>:X2`, … so the subset is obvious downstream. Cross-subset deduplication is unnecessary because subsets contain disjoint files; if a finding happens to span subsets (e.g. an out-of-subset dependency you exposed via the `> Out-of-subset dependency:` header), assign it to whichever subset's reviewers raised it and leave the other subset alone.
 
-After both (or, if a Claude stand-in ran, still both) return, parse each agent's JSON. **If the response contains multiple ```json fenced blocks (e.g. the model echoed the example schema), use the LAST block as the answer** — the templates instruct the model to emit its answer last, and any earlier block is an echo. If an agent returned prose, salvage what you can and flag the run as less reliable.
+After every agent in the active roster returns, parse its JSON. **If the response contains multiple ```json fenced blocks (e.g. the model echoed the example schema), use the LAST block as the answer** — the templates instruct the model to emit its answer last, and any earlier block is an echo. If an agent returned prose, salvage what you can and flag the run as less reliable.
 
-- `AGY_FAILED` with no stand-in available → proceed with only the surviving reviewer's findings.
+- `AGY_FAILED` → proceed with opus + sonnet findings only.
+- If opus or sonnet failed with no counterpart to fall back on → proceed with the survivor(s).
 
 Deduplicate across agents (same file, overlapping lines, same root cause → one merged finding). Be conservative — only merge when clearly the same issue. When merging, take the higher severity.
 
 For each merged finding, assign a stable cross-val id `X1`, `X2`, … and record `file`, `lines`, `severity`, `title`, `claim`, `evidence`, `suggested_fix` (most self-contained variant when multiple agents flagged it). **`suggested_fix` must end up non-empty for every finding** — if every agent that flagged it left `suggested_fix` empty, write a concrete one-line fix yourself from the `claim`/`evidence` before moving on. Step 6 always prints a planned fix per finding, so there must be one to print.
 
-The set of unique findings — regardless of who flagged each one — is the input to Step 5. **Every validator validates every finding** (including findings it originally flagged); the prompt removes explicit authorship signals (no reviewer name, no ordering hint, no "you said" framing). Note that the verbatim `claim` text retains its original stylistic fingerprint, so this is a soft (not absolute) protection against self-recognition bias.
+The set of unique findings — regardless of who flagged each one — is the input to Step 5. **Every reviewer in the active roster validates every finding** (including findings it originally flagged); the prompt removes explicit authorship signals (no reviewer name, no ordering hint, no "you said" framing). Note that the verbatim `claim` text retains its original stylistic fingerprint, so this is a soft (not absolute) protection against self-recognition bias.
 
 ### Step 5: Peer validation pass
 
-> **Per subset.** When Step 1b planned multiple subsets, run a separate validation pass per subset, scoring only that subset's consolidated findings. Validator prompts use `<label>` = `<base-label>__<subset-name>`. Across all subsets the same ~4-concurrent-CLI cap from Step 1b applies; batch validators if running many subsets at once. Findings from different subsets are never mixed in a single validator prompt — that would force a validator to chase paths outside the subset it was scoped to.
+> **Per subset.** When Step 1b planned multiple subsets, run a separate validation pass per subset, scoring only that subset's consolidated findings. Validator prompts use `<label>` = `<base-label>__<subset-name>`. Across all subsets the same concurrency cap from Step 1b applies; batch validators if running many subsets at once. Findings from different subsets are never mixed in a single validator prompt — that would force a validator to chase paths outside the subset it was scoped to.
 
-Both validators (Claude, agy) run against **every** consolidated finding — including findings they originally flagged. The prompt is deliberately neutral and hides any framing about who proposed the issue. **Both validators read from disk — no file contents are inlined**, since both CLIs have disk access.
+Every reviewer in the active roster (opus, sonnet, and agy if included) runs against **every** consolidated finding — including findings it originally flagged. The prompt is deliberately neutral and hides any framing about who proposed the issue. **All validators read from disk — no file contents are inlined**, since every CLI in this skill has disk access.
 
 Write `.code_review/XX_PROMPT__<label>_<agent>_validate.md`:
 
@@ -222,76 +233,85 @@ Items:
 
 Per-agent prompt rules:
 - **Shuffle the order of items independently for each validating agent.** This defeats position bias.
-- Both validators get the same full list of consolidated findings (including ones they originally flagged at detection).
+- Every reviewer in the active roster gets the same full list of consolidated findings (including ones it originally flagged at detection).
 - **No reviewer attribution and no meta-framing.** Do not name any original finder; do not say "you wrote this" or "you flagged this"; do not reveal that this prompt follows an earlier *detection* pass or that another agent produced these claims. The agree/disagree question itself IS the task — `do you agree with the finding?` is fine and intentional; what's forbidden is exposing the multi-agent / peer-review workflow context.
-- Include `file`, `lines`, `finding` (the `claim` text), and `reachability` (the `evidence` text) per item — the detection schema (line above) promises validators will see both. Severity and any other Step-4 metadata are still omitted to avoid anchoring the verdict.
-- Do NOT inline file contents — both validators read from disk.
-- **agy validator prompt ONLY:** append the **agy narration-suppression block** (defined in Step 2, using the no-`<scratch>` wording) as the last lines of `XX_PROMPT__<label>_agy_validate.md`, for the same timeout reason as detection. The claude validator prompt does not get it.
+- Include `file`, `lines`, `finding` (the `claim` text), and `reachability` (the `evidence` text) per item — the detection schema promises validators will see both. Severity and any other Step-4 metadata are still omitted to avoid anchoring the verdict.
+- Do NOT inline file contents — every validator reads from disk.
+- **agy validator prompt ONLY (when agy is in the roster):** append the **agy narration-suppression block** (defined in Step 2, using the no-`<scratch>` wording) as the last lines of `XX_PROMPT__<label>_agy_validate.md`, for the same timeout reason as detection. The opus and sonnet validator prompts do not get it.
 
-**Launch both validators in parallel.** Each validator uses its CLI's default model — validation is a narrow yes/no per claim, so the prompt scope (not a smaller model) is the main efficiency lever.
+**Launch the active roster's validators in parallel.** Each Claude validator uses the same pinned model as its own detection run — opus stays opus, sonnet stays sonnet. Pinning matters here: the point of splitting Claude into two slots is to compare Opus's and Sonnet's independent judgment on every finding, not just add a second inference pass at whatever the CLI's default happens to be.
 
-**Claude validator:**
+**Opus validator:**
 ```bash
-cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.code_review/claude" && cat ../XX_PROMPT__<label>_claude_validate.md | claude -p --dangerously-skip-permissions --output-format text
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.code_review/opus" && cat ../XX_PROMPT__<label>_opus_validate.md | claude -p --model opus --dangerously-skip-permissions --output-format text
 ```
 
-**agy validator:**
+**Sonnet validator:**
+```bash
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.code_review/sonnet" && cat ../XX_PROMPT__<label>_sonnet_validate.md | claude -p --model sonnet --dangerously-skip-permissions --output-format text
+```
+
+**agy validator (only when in this run's roster):**
 ```bash
 cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.code_review/agy" && OUTPUT=$(cat ../XX_PROMPT__<label>_agy_validate.md | agy -p --dangerously-skip-permissions --print-timeout 10m 2>&1); STATUS=$?; echo "$OUTPUT"; if [ -z "$(echo "$OUTPUT" | tr -d '[:space:]')" ] || [ "$STATUS" -ne 0 ]; then echo "AGY_FAILED"; fi
 ```
 
-If the agy validator returns `AGY_FAILED`, fall back to a second Claude validator on the same prompt. Use `sed` to rewrite the agy-rendered "Your cwd is ..." sentence so it matches the stand-in's actual cwd (otherwise the prompt tells it its cwd is `.code_review/agy/`, which is false):
-```bash
-cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.code_review/claude" && sed 's|`.code_review/agy/`|`.code_review/claude/`|g' ../XX_PROMPT__<label>_agy_validate.md | claude -p --dangerously-skip-permissions --output-format text
-```
-Treat its verdicts as agy's for synthesis, and note in the user-facing output that agy's validator was replaced by a Claude stand-in — with agy out, both validator slots are Claude runs, so treat any resulting label as a single-model corroboration, not true cross-model agreement.
+If the agy validator returns `AGY_FAILED`, drop it from validation for this run and proceed with the opus + sonnet verdicts using the two-slot tier scheme (Step 6) — this can happen even when agy succeeded at detection, since validation is a separate CLI call; treat detection and validation rosters as decided independently.
 
-If this Claude stand-in ALSO fails (which would be unusual, since Claude is the CLI running this skill), drop the agy slot for this run and proceed with only the Claude validator's verdicts — do NOT manufacture a verdict for the missing slot.
+If opus or sonnet's validator run fails, proceed with the survivor(s); do NOT manufacture a verdict for the missing slot.
 
-Parse each validator's JSON into per-issue verdicts. You now have, for each finding, up to 2 verdicts (one per validator).
+Parse each validator's JSON into per-issue verdicts. You now have, for each finding, one verdict per validator that actually ran (2 or 3).
 
 ### Step 6: Synthesis
 
 > **Multiple subsets.** When Step 1b planned multiple subsets, the synthesis report combines all subsets into a single output. Re-number findings into a global `X1`, `X2`, … sequence and append `(subset: <subset-name>)` after each X-id label so the reader can see where each finding came from. Order severity tiers globally (all Critical findings first across all subsets, then High across all subsets, etc.). If any subset had its `> Note: this subset exceeds the recommended review size` header, surface that caveat once near the top of the report. If a subset returned zero findings at any tier, you do not need a per-subset placeholder — the tier-level `None.` rule still applies globally.
 
-For each finding, compute a confidence label **purely from validator verdicts**. Who originally flagged the issue at detection is not used at synthesis — both validators scored every finding.
+For each finding, compute a confidence label **purely from validator verdicts**. Who originally flagged the issue at detection is not used at synthesis — every active validator scored every finding.
 
-Each validator returns one of `agree`, `disagree`, `unsure` per finding (those are the only valid verdicts — "unverified" is not a verdict). If a validator's CLI itself failed and no stand-in could replace it, that validator simply doesn't have a verdict on this run — note the dropped validator inline (e.g. "agy unavailable") so the reader sees there is only one vote.
+Each validator returns one of `agree`, `disagree`, `unsure` per finding (those are the only valid verdicts — "unverified" is not a verdict).
 
-With two validator slots, apply rules in order, top-down — first match wins:
+**Pick the tier scheme once per run, based on how many validator slots actually returned a verdict** (not how many were originally planned — a mid-run `AGY_FAILED` at validation still counts as "didn't run"):
 
+**Three validators ran (opus, sonnet, agy):** apply top-down, first match wins:
+1. **Rejected** — 2 or more `disagree`, no `agree`.
+2. **Unanimous** — all three returned `agree`.
+3. **Controversial** — at least one `agree` AND at least one `disagree` (a genuine split among voters). Show every dissenting reason inline.
+4. **Agreed** — 2 or more `agree`, no `disagree`.
+5. **Inconclusive** — everything else (unsure-heavy, or too few opinions to decide).
+
+**Two validators ran (opus, sonnet only — agy skipped, unavailable, or dropped mid-run):** apply top-down, first match wins:
 1. **Rejected** — both slots ran and both returned `disagree`.
 2. **Agreed** — both slots ran and both returned `agree`.
-3. **Disputed** — both slots ran, one `agree` and one `disagree` (a genuine split among voters). Show both reasons inline.
-4. **Inconclusive** — everything else: any `unsure` involved (agree+unsure, disagree+unsure, unsure+unsure), OR only one validator slot ran at all (the other dropped with no stand-in). A single surviving verdict is never enough on its own to reach Agreed/Rejected/Disputed — it needs corroboration from the second validator. Show the lone verdict and reason so the reader can weigh it themselves.
+3. **Disputed** — both slots ran, one `agree` and one `disagree`. Show both reasons inline.
+4. **Inconclusive** — everything else: any `unsure` involved, OR only one validator slot ran at all. A single surviving verdict is never enough on its own to reach Agreed/Rejected/Disputed — it needs corroboration from a second validator. Show the lone verdict and reason so the reader can weigh it themselves.
 
 **Do NOT re-judge severity at synthesis.** The reviewers/validators saw the code; you're working from JSON. Your job is narrow: deduplicate, label confidence, present. Use the merged severity from Step 4. If you think a verdict is weak, surface that as a user-facing note next to the finding — do not silently downgrade or drop it.
 
-**Present** grouped by severity tier. For each tier, list findings or write `None.` explicitly. Every bullet starts with the X-id in bold. The label lists both validator verdicts in a fixed order (Claude, agy) so the reader can see at a glance how each model voted — but do NOT mention who originally flagged the issue.
+**Present** grouped by severity tier. For each tier, list findings or write `None.` explicitly. Every bullet starts with the X-id in bold. The label lists each active validator's verdict in a fixed order (Opus, Sonnet, agy — dropping agy from the list entirely when it isn't in this run's roster) so the reader can see at a glance how each model voted — but do NOT mention who originally flagged the issue.
 
 **Every finding gets a `Fix:` line — no exceptions.** Print it as a second line under the bullet, using the finding's (possibly synthesizer-authored, per Step 4) `suggested_fix`. This lets the reader decide apply/skip from the report alone, without re-opening each agent's raw JSON. For a `Rejected` finding, replace the fix text with a one-line note that no fix is planned since validators treat it as a false positive — do not invent a code fix for something the review concluded isn't real.
 
 ```
 ## Critical (must fix immediately)
-- **X1** [Agreed: Claude agree, agy agree] Description… (file:line)
+- **X1** [Unanimous: Opus agree, Sonnet agree, agy agree] Description… (file:line)
   Fix: <concrete one-line fix>
 
 ## High (likely bugs / significant hazards)
-- **X2** [Disputed: Claude agree, agy disagree — "<reason>"] Description… (file:line)
+- **X2** [Agreed: Opus agree, Sonnet agree] Description… (file:line) — agy not in this run's roster.
   Fix: <concrete one-line fix>
-- **X3** [Inconclusive: Claude unsure — "<reason>", agy agree] Description… (file:line)
+- **X3** [Controversial: Opus agree, Sonnet disagree — "<reason>", agy agree] Description… (file:line)
   Fix: <concrete one-line fix>
-- **X4** [Agreed: Claude agree, agy (Claude stand-in) agree] Description… (file:line) — agy's slot ran as a Claude stand-in this round.
+- **X4** [Disputed: Opus agree, Sonnet disagree — "<reason>"] Description… (file:line)
   Fix: <concrete one-line fix>
 
 ## Medium (quality issues)
-- **X5** [Rejected: Claude disagree — "<reason>", agy disagree — "<reason>"] Description… (file:line) — included for transparency; no validator agrees, treat as a likely false positive.
+- **X5** [Rejected: Opus disagree — "<reason>", Sonnet disagree — "<reason>", agy disagree — "<reason>"] Description… (file:line) — included for transparency; no validator agrees, treat as a likely false positive.
   Fix: None planned — treated as a false positive.
-- **X6** [Inconclusive: Claude agree, agy unavailable] Description… (file:line) — agy CLI failed and the stand-in also failed; only one validator vote available.
+- **X6** [Inconclusive: Opus agree, agy unavailable] Description… (file:line) — agy's validator failed mid-run; only one validator vote available.
   Fix: <concrete one-line fix>
 ```
 
-For Disputed / Inconclusive items, always include each non-`agree` validator's short reason in quotes.
+For Disputed / Controversial / Inconclusive items, always include each non-`agree` validator's short reason in quotes.
 
 **Offer to fix.** Ask which findings to apply, by X-id (e.g. "apply X1 and X3").
 
@@ -307,12 +327,14 @@ cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" && touch .code_review/X
 
 ## Notes
 
-- Large projects are split into independent subsets at Step 1b (~6k lines / ~40 files / ~300 KB threshold), with Steps 2–5 running per subset in parallel under a ~4-concurrent-CLI cap, and Step 6 merging all subsets into a single global report.
-- Both CLIs run with their default model in both detection (Step 3) and validation (Step 5) — no model pinning.
-- **Both validators validate every finding** (including ones they originally flagged at detection). The prompt removes explicit origin signals — no reviewer name, no ordering hint, no "you said" framing. Self-recognition via stylistic fingerprints in the verbatim `claim` text is a known residual risk (frontier evaluators recognize their own outputs above chance — Panickssery et al. 2024), so treat this as a soft, not absolute, protection.
+- Large projects are split into independent subsets at Step 1b (~6k lines / ~40 files / ~300 KB threshold), with Steps 2–5 running per subset in parallel under a concurrency cap, and Step 6 merging all subsets into a single global report.
+- The two Claude slots are **pinned** (`--model opus`, `--model sonnet`) in both detection (Step 3) and validation (Step 5) — the whole point of the split is to compare Opus's and Sonnet's independent judgment, not to add a second run at whatever the CLI's default model happens to be.
+- agy is optional and purely additive. It's included only when the `agy` CLI is found on PATH AND the user hasn't asked to skip it (`--no-agy`, "skip agy", "without agy"). If it fails at detection or validation, it's simply dropped from the roster for that step — there's no stand-in, since opus + sonnet is already a complete two-reviewer roster on its own.
+- **Every reviewer in the active roster validates every finding** (including ones it originally flagged at detection). The prompt removes explicit origin signals — no reviewer name, no ordering hint, no "you said" framing. Self-recognition via stylistic fingerprints in the verbatim `claim` text is a known residual risk (frontier evaluators recognize their own outputs above chance — Panickssery et al. 2024), so treat this as a soft, not absolute, protection.
 - Claim order is shuffled independently per validator to defeat position bias.
 - Synthesis labels are derived **purely from validator verdicts**, not from who originally flagged the finding. Detection only determines what gets into the candidate list; validation determines confidence.
 - Validators are told to read freely inside the target project directory; consulting files outside the project is allowed only reluctantly when a claim genuinely cannot be settled from in-project code.
-- If agy fails at detection, a second independent Claude run stands in for the second reviewer slot (detection identities aren't surfaced at synthesis, so no stand-in label is needed). If agy fails at validation, a second Claude run stands in for agy's validator slot — that one IS labelled in the synthesis output ("agy (Claude stand-in)") because validator identities are what the synthesis presents, and because with both slots now run by Claude, the resulting label reflects single-model corroboration rather than true cross-model agreement.
-- If a detection or validation run fails with no stand-in available, proceed with the survivor alone — never invent a verdict for the missing slot. A single surviving validator verdict on its own always lands in the Inconclusive tier (see Step 6) since it lacks corroboration.
+- The confidence-tier scheme (Step 6) is chosen per run based on how many validator slots actually returned a verdict — 3 slots use Unanimous/Agreed/Controversial/Rejected/Inconclusive; 2 slots use Agreed/Disputed/Rejected/Inconclusive. Detection and validation rosters are decided independently, so it's possible for agy to contribute detection findings but drop out of validation (or vice versa).
+- If opus or sonnet fails with no counterpart to fall back on, proceed with the survivor(s) — never invent a verdict for the missing slot. A single surviving validator verdict on its own always lands in the Inconclusive tier (see Step 6) since it lacks corroboration.
 - If a review is requested multiple times, write each prompt as if it's the first review — do not mention prior reviews.
+
