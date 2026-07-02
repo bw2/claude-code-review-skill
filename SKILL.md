@@ -307,7 +307,6 @@ cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" && touch .code_review/X
 
 ## Notes
 
-- There is **no shared context bundle** — each agent reads the local repo from `../..` (two levels up from its run subdirectory `.code_review/<agent>/`) on its own.
 - Large projects are split into independent subsets at Step 1b (~6k lines / ~40 files / ~300 KB threshold), with Steps 2–5 running per subset in parallel under a ~4-concurrent-CLI cap, and Step 6 merging all subsets into a single global report.
 - Both CLIs run with their default model in both detection (Step 3) and validation (Step 5) — no model pinning.
 - **Both validators validate every finding** (including ones they originally flagged at detection). The prompt removes explicit origin signals — no reviewer name, no ordering hint, no "you said" framing. Self-recognition via stylistic fingerprints in the verbatim `claim` text is a known residual risk (frontier evaluators recognize their own outputs above chance — Panickssery et al. 2024), so treat this as a soft, not absolute, protection.
