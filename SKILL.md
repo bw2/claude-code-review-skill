@@ -243,17 +243,17 @@ Per-agent prompt rules:
 
 **Opus validator:**
 ```bash
-cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.code_review/opus" && cat ../XX_PROMPT__<label>_opus_validate.md | claude -p --model opus --dangerously-skip-permissions --output-format text
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.code_review/opus" && cat ../XX_PROMPT__<label>_opus_validate.md | claude -p --model opus --output-format text
 ```
 
 **Sonnet validator:**
 ```bash
-cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.code_review/sonnet" && cat ../XX_PROMPT__<label>_sonnet_validate.md | claude -p --model sonnet --dangerously-skip-permissions --output-format text
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.code_review/sonnet" && cat ../XX_PROMPT__<label>_sonnet_validate.md | claude -p --model sonnet --output-format text
 ```
 
 **agy validator (only when in this run's roster):**
 ```bash
-cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.code_review/agy" && OUTPUT=$(cat ../XX_PROMPT__<label>_agy_validate.md | agy -p --dangerously-skip-permissions --print-timeout 10m 2>&1); STATUS=$?; echo "$OUTPUT"; if [ -z "$(echo "$OUTPUT" | tr -d '[:space:]')" ] || [ "$STATUS" -ne 0 ]; then echo "AGY_FAILED"; fi
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.code_review/agy" && OUTPUT=$(cat ../XX_PROMPT__<label>_agy_validate.md | agy -p --print-timeout 10m 2>&1); STATUS=$?; echo "$OUTPUT"; if [ -z "$(echo "$OUTPUT" | tr -d '[:space:]')" ] || [ "$STATUS" -ne 0 ]; then echo "AGY_FAILED"; fi
 ```
 
 If the agy validator returns `AGY_FAILED`, drop it from validation for this run and proceed with the opus + sonnet verdicts using the two-slot tier scheme (Step 6) — this can happen even when agy succeeded at detection, since validation is a separate CLI call; treat detection and validation rosters as decided independently.
