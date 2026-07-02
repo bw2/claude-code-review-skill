@@ -1,20 +1,6 @@
 # claude-code-review-skill
 
-A [Claude Code](https://claude.com/claude-code) skill that runs code review with two independent CLI agents — Claude and [agy](https://antigravity.google/) (Google Antigravity) — reading your local files directly from disk, then cross-checks every finding through a blind peer-validation pass before showing it to you.
-
-## Why
-
-A single review pass from one model has a predictable failure mode: plausible-sounding findings that don't hold up once you check them, and no way to tell which ones to trust. This skill runs two models in parallel, each reading the repo independently with **no shared context bundle**, then has both models re-score every consolidated finding under a neutral prompt that hides who originally flagged it. The result is a report where each finding carries a confidence label — **Agreed**, **Disputed**, **Rejected**, or **Inconclusive** — based purely on how the validators voted, not on which model found it first.
-
-## Features
-
-- **Two independent reviewers.** Claude and agy each read the target files from disk on their own — no risk of one model's framing biasing the other's first pass.
-- **Blind peer validation.** Every finding both models produced is re-evaluated by both, using a prompt stripped of reviewer attribution — self-recognition bias is reduced, not eliminated (residual stylistic fingerprints in the finding text can still leak authorship).
-- **Confidence labels, not just a list.** Findings are grouped as Agreed / Disputed / Rejected / Inconclusive so you can triage by trust level instead of reading everything.
-- **Reachability-gated findings.** Reviewers are required to trace a concrete caller/test/config that triggers each issue — speculative "this would break if X were None" claims with no real trigger are dropped before you ever see them.
-- **Automatic subset splitting.** Large projects are split into cohesive, independently-reviewed subsets so review quality doesn't degrade on big diffs.
-- **Graceful degradation.** If agy is rate-limited or fails, Claude stands in for the missing slot so the review still runs — and the report says so.
-- **Every finding ships with a fix.** No dead-end reports — each surviving finding includes a concrete one-line suggested fix.
+A [Claude Code](https://claude.com/claude-code) skill that runs code review with two independent CLI agents — Claude and [agy](https://antigravity.google/) (Google Antigravity). The two agents indepedently review your code in parallel, then merge the results, and then do a second-pass validation round to see if they agree with eachothers' findings. At the end, you are represented with a list of all findings along with the level of agreement between the two agents (**Agreed**, **Disputed**, etc), and the proposed fixes.
 
 ## Requirements
 
