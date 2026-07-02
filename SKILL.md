@@ -3,8 +3,7 @@ name: review
 description: >
   Performs code review by launching two agentic CLI tools — Claude and agy
   (Google Antigravity) - in parallel. Then, it merges their findings into a deduplicated list and lauches a 
-  validation pass, asking Claude and agy to check whether they agree with eachothers' findings. Then, it presents
-  you with a final list of findings so that you can choose which ones to fix.
+  validation pass, asking Claude and agy to agree or disagree with eachothers' findings. Then, it gives you a final list of findings so that you can choose which ones to fix.
 ---
 
 # Review Skill
