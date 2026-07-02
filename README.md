@@ -1,6 +1,6 @@
 # claude-code-review-skill
 
-A [Claude Code](https://claude.com/claude-code) skill that runs code review using two independent models — Claude and [agy](https://antigravity.google/) (Google Antigravity). The two agents indepedently review your code in parallel, then merge the results, and then do a second-pass validation round to see if they agree with eachothers' findings. At the end, you are represented with a list of all findings along with the level of agreement between the two agents (**Agreed**, **Disputed**, etc), and the proposed fixes.
+A [Claude Code](https://claude.com/claude-code) skill that runs code review using two separate agentic CLI tools — Claude and [agy](https://antigravity.google/) (Google Antigravity). The two agents indepedently review your code in parallel, then merge the results, and then do a second-pass validation round to see if they agree with eachothers' findings. At the end, you are represented with a list of all findings along with the level of agreement between the two agents (**Agreed**, **Disputed**, etc), and the proposed fixes.
 
 ## Requirements
 
