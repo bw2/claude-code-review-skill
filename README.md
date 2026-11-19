@@ -36,6 +36,22 @@ To update an existing install:
 git -C ~/.claude/skills/review pull
 ```
 
+### Optional: `/review-until-done`
+
+The `review-until-done/` folder holds a second skill that runs `/review` in a loop: after each round it applies every fix the reviewers agreed on (`Unanimous` or `Agreed`), runs the project's tests if it can find them, and reviews again. It stops when the only findings left are `Controversial`, `Rejected` or `Inconclusive`, or real but rare edge cases, or after 8 rounds (change this with `--max-iterations N`). It stops right away if the tests fail. Fixes are left in your working tree and are never committed.
+
+Claude Code only finds skills one folder below `~/.claude/skills/`, so link this one into place after cloning:
+
+```bash
+ln -s ~/.claude/skills/review/review-until-done ~/.claude/skills/review-until-done
+```
+
+Then use it the same way as `/review`:
+
+```
+/review-until-done path/to/file.py
+```
+
 ## Usage
 
 ```
